@@ -1,0 +1,12 @@
+node_modules
+
+.ACCESS_TOKEN_OVERRIDE
+.env
+.vscode
+.claude
+.backup*
+backup-original/
+.wallets-cache.json
+wallets.txt
+
+.DS_Store

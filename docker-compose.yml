@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  ordinal-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: multi-provider-engine
+    ports:
+      - "5555:3000"
+    environment:
+      - PORT=3000
+      - ACCESS_TOKEN=${ACCESS_TOKEN}
+    volumes:
+      - ./.wallets-cache.json:/usr/src/app/.wallets-cache.json
+      - ./wallets.txt:/usr/src/app/wallets.txt
+      - ./.ACCESS_TOKEN_OVERRIDE:/usr/src/app/.ACCESS_TOKEN_OVERRIDE
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: satsranges-tunnel
+    profiles: [tunnel]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://ordinal-engine:3000
+    depends_on:
+      - ordinal-engine

@@ -459,7 +459,7 @@ async function refreshWallets() {
 // ---------------------------------------------------------------------------
 // Auto-detect wallet type on selection
 // ---------------------------------------------------------------------------
-function updateMultisigCheckbox() {
+async function updateMultisigCheckbox() {
   const senderId = document.getElementById('senderWallet').value;
   const feeId     = document.getElementById('feeWallet').value;
   const isMultisigCheckbox = document.getElementById('isMultisig');

@@ -1,0 +1,28 @@
+services:
+  app:
+    build: .
+    container_name: bitgo-ordinal-ui
+    ports:
+      - "3000:3000"
+    volumes:
+      # project dir bind-mount so runtime writes (.env, .wallets-cache.json, etc.) persist on host
+      - .:/usr/src/app
+      # named volume overlays host node_modules with image's npm ci build
+      - node_modules:/usr/src/app/node_modules
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+
+  # Optional Cloudflare tunnel — enables public HTTPS URL without port forwarding.
+  # Start with: docker compose --profile tunnel up
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: bitgo-tunnel
+    profiles: [tunnel]
+    command: tunnel --no-autoupdate --url http://app:3000
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  node_modules:

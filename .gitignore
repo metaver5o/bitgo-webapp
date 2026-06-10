@@ -8,5 +8,6 @@ node_modules
 backup-original/
 .wallets-cache.json
 wallets.txt
-
+Drats/
 .DS_Store
+Bitgo-webapp/

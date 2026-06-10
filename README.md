@@ -1,246 +1,167 @@
-# BitGo Ordinals Transfer ToolMinimal folder to reproduce the exact 5,000 sats send flow.
+# BitGo Ordinal Transfer Tool
 
+Web UI + CLI for transferring exact satoshi UTXOs (ordinals) between BitGo wallets while preserving sat ranges. A separate fee wallet pays all transaction fees.
 
+## Problem
 
-Clean, minimal tool for transferring exact satoshi amounts (ordinals) between BitGo wallets while preserving sat ranges.Files included:
+When moving ordinals:
+1. Exact sat amounts must be preserved — they can't be consumed as fees.
+2. BitGo doesn't allow mixing inputs from different wallets in one TX.
+3. If the sender wallet only holds the ordinal amount, it has no sats left for fees.
 
-- `prebuild_5000.json` — the BitGo prebuild response (txHex, feeInfo)
+## Solution
 
-## Problem Solved- `run.sh` — a small script that walks through validate -> prebuild -> send using `.ACCESS_TOKEN_OVERRIDE` and a passfile
+Auto-funding + CPFP strategy:
 
-- `.env.example` — sample env showing where to put ACCESS_TOKEN
+1. **Fund check** — if sender can't cover fees, fee wallet sends 546+ sats to sender first (dust threshold minimum).
+2. **Wait for indexing** — polls until BitGo indexes the funding TX (up to 60s).
+3. **Transfer** — sender sends exact ordinal sats to destination address.
+4. **CPFP** — fee wallet creates a high-fee child TX referencing the parent, accelerating both.
 
-When transferring ordinals between wallets, you need to:- `package.json` — minimal dependencies for Node helper
+## Setup
 
-1. **Preserve exact sat amounts** (can't use them as fees)- `.gitignore` — exclude secrets
-
-2. **Have a separate wallet pay transaction fees**- `config.example.json` — example runtime configuration for `cpfp_run.js`
-
-3. **Prove the same sats moved through multiple wallets**- `cpfp_run.js` — configurable runner (prebuild → sign → send)
-
-- `cpfp_child.js` — child tx helper (if present)
-
-BitGo's API doesn't support mixing inputs from different wallets in a single transaction, so this tool implements an automatic funding + CPFP strategy.
-
-Usage: edit `.env.example` or create `.ACCESS_TOKEN_OVERRIDE` in this folder, add your passphrase to `/tmp/bitgo.pass` (or change `run.sh`), then run `./run.sh`.
-
-## How It Works
-
-Runner and automation
-
-**Strategy:** If sender wallet lacks funds for fees, fee-paying wallet automatically funds it first, then sender transfers exact ordinals.---------------------
-
-You can put dynamic values into `config.json` (use `config.example.json` as a template) and then run:
-
-**Example Flow:** Transfer 500 ordinal sats from `btc` → `alice` with `5K` paying all fees:
+### 1. Install
 
 ```bash
-
-1. **Auto-funding** (if needed): `5K` sends 546+ sats to `btc` for fee paymentcd FINAL
-
-2. **Wait for indexing**: Script polls until BitGo indexes the funding txmake run
-
-3. **Transfer ordinals**: `btc` sends exact 500 sats to `alice` ```
-
-4. **CPFP acceleration**: `5K` creates high-fee tx to accelerate confirmation
-
-Or with Docker Compose:
-
-Result: **Exact 500 ordinal sats** arrive at alice, all fees paid by 5K wallet.
-
-```bash
-
-## Setupcd FINAL
-
-docker compose up --build --abort-on-container-exit
-
-### 1. Install Dependencies```
-
-
-
-```bashThe runner will prebuild the transaction and save `prebuild.json` for inspection, then read `/tmp/bitgo.pass` for the wallet passphrase and sign/send the transaction. Results are written to `send_result.json` and logged to `cpfp_run.log`.
-
 npm install
-
-```Notes and next improvements
-
-- Add a simple frontend to edit config and show status (we can add a lightweight React app served by the node backend and a docker-compose service).
-
-### 2. Configure Wallets- Implement sats-range verification against ordinals explorer (this requires pulling ordinals data; we can integrate with an ordinals API or scrape the site).
-
-- Be careful with tokens and passphrases — do not commit secrets. Use `.gitignore` (already present) and the provided `.env.example`.
-
-Edit `wallets.txt` with your wallet names and IDs:Minimal folder to reproduce the exact 5,000 sats send flow.
-
-
-
-```Files included:
-
-btc 68e861f32a71afbb33dcc7110179e695- `prebuild_5000.json` — the BitGo prebuild response (txHex, feeInfo)
-
-5K 68e863476a4cefcc84e1b4f25eea7a98- `run.sh` — a small script that walks through validate -> prebuild -> send using `.ACCESS_TOKEN_OVERRIDE` and a passfile
-
-alice 690bbad191dc411eda2e14e5e7e6ac75- `.env.example` — sample env showing where to put ACCESS_TOKEN
-
-bob 690bbb03e17d39ddac16dd64aeff15df- `package.json` — minimal dependencies for Node helper
-
-```- `.gitignore` — exclude secrets
-
-
-
-### 3. Configure Access TokenUsage: edit `.env.example` or create `.ACCESS_TOKEN_OVERRIDE` in this folder, add your passphrase to `/tmp/bitgo.pass` (or change `run.sh`), then run `./run.sh`.
-
-
-Create `.env` file:
-
-```bash
-ACCESS_TOKEN="v2x..."
-WALLET_ID=your_default_wallet_id
 ```
 
-Get your token from BitGo dashboard with these permissions:
-- Wallet - View all
-- Wallet - Spend
-- Wallet - Create
+### 2. Configure wallets
 
-**Important:** Set IP restriction to your current IP for security.
+Edit `wallets.txt` (format: `name id`):
+
+```
+btc  68e861f32a71afbb33dcc7110179e695
+5K   68e863476a4cefcc84e1b4f25eea7a98
+alice 690bbad191dc411eda2e14e5e7e6ac75
+bob  690bbb03e17d39ddac16dd64aeff15df
+```
+
+Or use **Refresh from BitGo** in the web UI to auto-populate.
+
+### 3. Configure access token
+
+Create `.env`:
+
+```
+ACCESS_TOKEN="v2x..."
+```
+
+Get your token from the BitGo dashboard with:
+- Wallet: View all
+- Wallet: Spend
+- Wallet: Create
+
+Set IP restriction to your current IP (or `0.0.0.0/0` if you get IP-restriction errors).
 
 ## Usage
 
-### Interactive Transfer
+### Web UI
+
+```bash
+node server.js
+# open http://localhost:3000
+```
+
+Steps:
+1. Enter and save your BitGo access token.
+2. Load or refresh wallets.
+3. Select sender and fee wallets.
+4. Enter destination address, amount (sats), and fee rate (sat/kB).
+5. Enter wallet passphrase.
+6. Optionally check **Prebuild only** to inspect without broadcasting.
+7. Click **Run Transfer**.
+
+### CLI (interactive)
 
 ```bash
 make transfer
 ```
 
-Follow the prompts:
-- **Who will fund the txs?** → Wallet that pays all transaction fees (e.g., `5K`)
-- **Who's sending wallet?** → Wallet with ordinals to send (e.g., `btc`)
-- **Who is receiving?** → Destination wallet (e.g., `alice`)
-- **Amount of sats:** → Exact amount to transfer (e.g., `500`)
-- **Fee rate (sat/kB):** → Press Enter for default 2000, or enter custom rate
-- **Prebuild only?** → `y` to preview without broadcasting, `N` to execute
+Prompts for fee wallet, sender wallet, destination address, amount, fee rate, and passphrase.
 
-### Example Session
+### CLI (direct)
 
-```
-=== Available Wallets ===
-btc 68e861f32a71afbb33dcc7110179e695
-5K 68e863476a4cefcc84e1b4f25eea7a98
-alice 690bbad191dc411eda2e14e5e7e6ac75
-bob 690bbb03e17d39ddac16dd64aeff15df
-
-Who will fund the txs? 5K
-Who's sending wallet? btc
-Who is receiving? alice
-Amount of sats: 500
-Fee rate (sat/kB) [2000]: 1000
-Prebuild only? (y/N): N
+```bash
+node send_exact_cpfp.js \
+  --fee-wallet-id=ID \
+  --parent-wallet-id=ID \
+  --destination-address=bc1p... \
+  --amount-sats=5000 \
+  --fee-rate=1000 \
+  [--prebuild-only]
 ```
 
-The script will:
-1. Check if sender has enough for amount + fee
-2. Auto-fund from fee wallet if needed (>= 546 sats dust threshold)
-3. Wait for funding to be indexed (up to 60 seconds)
-4. Send exact ordinals from sender → receiver
-5. Create CPFP from fee wallet to accelerate
+Passphrase must be in `.bitgo-pass` (chmod 600) in the working directory.
 
 ## Files
 
-- **`Makefile`** - Interactive CLI interface
-- **`send_exact_cpfp.js`** - Main orchestrator script
-- **`wallets.txt`** - Wallet configuration (name → ID mapping)
-- **`.env`** - BitGo access token and settings
-- **`package.json`** - Node.js dependencies
+| File | Purpose |
+|------|---------|
+| `server.js` | Express backend; serves UI and REST API |
+| `index.html` | Web UI |
+| `send_exact_cpfp.js` | Core transfer orchestrator |
+| `list_wallets.js` | List BitGo BTC wallets; optionally update `wallets.txt` |
+| `Makefile` | CLI interface |
+| `wallets.txt` | Wallet name → ID mapping |
+| `prebuild_parent.json` | Last saved parent TX prebuild (audit) |
+| `prebuild_cpfp.json` | Last saved CPFP TX prebuild (audit) |
 
-## Technical Details
+## API
 
-### Why Auto-Funding?
+All endpoints served by `server.js` on port 3000.
 
-Bitcoin has a **dust threshold** of 546 sats - outputs below this are rejected. If sender wallet only has the exact ordinal amount (e.g., 500 sats), it can't pay any fee. Solution: fee wallet sends 546+ sats to sender first.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/token` | Return saved access token |
+| POST | `/api/token` | Save access token to `.env` and `.ACCESS_TOKEN_OVERRIDE` |
+| POST | `/api/wallets` | Return wallets from cache or `wallets.txt` |
+| POST | `/api/wallets/refresh` | Fetch live wallets + balances from BitGo; update cache |
+| POST | `/api/transfer` | Run transfer script; return buffered output |
 
-### Why CPFP?
+`POST /api/transfer` body:
 
-BitGo doesn't allow mixing inputs from different wallets. CPFP (Child Pays For Parent) creates a second transaction that references the first, paying a higher fee to accelerate both transactions together.
-
-### Prebuild-Only Mode
-
-Use `y` for prebuild-only to:
-- Inspect transaction before broadcasting
-- Verify fee amounts
-- Review output addresses
-- Check if auto-funding is needed
-
-Generated files: `prebuild_parent.json`, `prebuild_step1.json`, `prebuild_step2.json`
+```json
+{
+  "feeWalletId": "...",
+  "parentWalletId": "...",
+  "destinationAddress": "bc1p...",
+  "amountSats": 5000,
+  "feeRate": 1000,
+  "passphrase": "...",
+  "prebuildOnly": false
+}
+```
 
 ## Common Issues
 
-### "Sender wallet not yet funded"
+**"Sender wallet not yet funded"** — funding TX not yet indexed; wait 1-2 min and retry.
 
-The auto-funding transaction was sent but not yet indexed. Wait 1-2 minutes and retry.
+**"sub-dust-threshold amount"** — amount < 546 sats; Bitcoin rejects outputs below dust threshold.
 
-### "sub-dust-threshold amount"
+**"insufficient funds"** — sender and fee wallet together can't cover amount + fees.
 
-Trying to send < 546 sats. Bitcoin protocol rejects dust outputs.
+**"Missing parameter: address"** — BitGo SDK bug with `.send()`; the script works around it using `prebuild → sign → submit`.
 
-### "insufficient funds"
+**"IP-restricted token"** — your token has IP restrictions; create a new one with `0.0.0.0/0` or set the correct IP.
 
-Sender wallet doesn't have enough for amount + fee, and auto-funding failed. Check fee wallet balance.
+## Multi-hop transfers
 
-### "Missing parameter: address"
-
-Known BitGo SDK bug with `.send()` method. Script uses workaround: `prebuild → sign → submit`.
-
-## Multi-Hop Transfers
-
-To prove same sats moved through multiple wallets:
+To prove the same sats moved through multiple wallets:
 
 ```bash
 # Hop 1: btc → alice (5K pays fees)
-make transfer
-# Enter: 5K, btc, alice, 500
+make transfer   # fee=5K, sender=btc, dest=alice addr, amount=500
 
-# Hop 2: alice → bob (5K pays fees)  
-make transfer
-# Enter: 5K, alice, bob, 500
+# Hop 2: alice → bob (5K pays fees)
+make transfer   # fee=5K, sender=alice, dest=bob addr, amount=500
 ```
 
-After each hop, verify sat ranges with ordinals explorer to prove same sats moved.
+Verify sat ranges with an ordinals explorer after each hop.
 
-## Security Notes
+## Security
 
-- **Passphrase storage**: Script writes passphrase to `/tmp/bitgo.pass` temporarily, deletes after use
-- **IP restrictions**: Strongly recommended on BitGo access tokens
-- **Prebuild first**: Always test with prebuild-only mode before broadcasting
-- **Production environment**: Uses BitGo production API (`env: 'prod'`)
-
-## Troubleshooting
-
-### Check wallet balances
-
-```bash
-node -e "
-const BitGo = require('bitgo');
-const fs = require('fs');
-const env = fs.readFileSync('.env', 'utf8');
-const token = env.match(/ACCESS_TOKEN=\"([^\"]+)\"/)[1];
-const bitgo = new BitGo.BitGo({ env: 'prod', accessToken: token });
-
-(async () => {
-  const wallet = await bitgo.coin('btc').wallets().get({ id: 'WALLET_ID_HERE' });
-  const unspents = await wallet.unspents();
-  console.log('UTXOs:', unspents.unspents.map(u => \`\${u.id}: \${u.value} sats\`));
-  console.log('Total:', unspents.unspents.reduce((s, u) => s + u.value, 0), 'sats');
-})();
-"
-```
-
-### View transaction on blockchain
-
-```
-https://mempool.space/tx/TXID_HERE
-```
-
-## License
-
-MIT
+- Passphrase is written to `.bitgo-pass` temporarily and deleted immediately after the script exits.
+- Set IP restrictions on BitGo access tokens.
+- Always run prebuild-only first to inspect before broadcasting.
+- Never commit `.env`, `.ACCESS_TOKEN_OVERRIDE`, or `.bitgo-pass`.

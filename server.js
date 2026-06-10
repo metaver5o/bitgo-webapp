@@ -10,6 +10,7 @@ const bodyParser = require('body-parser');
 const { spawn }  = require('child_process');
 const fs         = require('fs');
 const path       = require('path');
+const fetch      = require('node-fetch');
 
 const app  = express();
 const PORT = 3000;
@@ -167,7 +168,21 @@ app.post('/api/wallets/refresh', (req, res) => {
   child.on('close', (code, signal) => {
     console.log(`[transfer] exit code=${code} signal=${signal}`);
     if (code !== 0) {
-      return res.status(500).json({ error: (err || out || 'list_wallets.js failed').trim() });
+      const raw = (err + '\n' + out).trim() || 'list_wallets.js failed';
+      const NOISE = [
+        /^bigint:/,
+        /^\(node:/,
+        /^secp256k1 unavailable/,
+        /^Fetching all Bitcoin wallets/,
+        /^Found \d+ wallet/,
+        /^To update wallets/,
+        /^Updated wallets/,
+        /^$/
+      ];
+      const clean = raw.split('\n')
+        .filter(l => !NOISE.some(re => re.test(l.trim())))
+        .join('\n').trim();
+      return res.status(500).json({ error: clean || raw });
     }
 
     // Parse balances from stdout
@@ -275,6 +290,177 @@ app.post('/api/transfer', (req, res) => {
     // Use res.json() — let Express handle Content-Length and encoding correctly
     res.json({ code, signal, output, success: code === 0 });
   });
+});
+
+// POST /api/audit-universal-ranges
+app.post('/api/audit-universal-ranges', async (req, res) => {
+  const { address } = req.body;
+  if (!address || !address.trim()) {
+    return res.status(400).json({ success: false, error: 'address is required' });
+  }
+
+  let utxos;
+  try {
+    const r = await fetch(`https://mempool.space/api/address/${address.trim()}/utxo`);
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      return res.status(502).json({ success: false, error: `mempool.space returned ${r.status}: ${txt}` });
+    }
+    utxos = await r.json();
+  } catch (e) {
+    return res.status(502).json({ success: false, error: 'Failed to fetch UTXOs: ' + e.message });
+  }
+
+  const results = await Promise.all(utxos.map(async (utxo) => {
+    const outpoint = `${utxo.txid}:${utxo.vout}`;
+    let data = null;
+    try {
+      const r = await fetch(`https://ordinals.com/output/${outpoint}`, {
+        headers: { Accept: 'application/json' }
+      });
+      if (r.ok) data = await r.json();
+    } catch (e) {
+      console.error(`[audit] ordinals lookup failed for ${outpoint}:`, e.message);
+    }
+
+    const ranges = data && data.sat_ranges && data.sat_ranges.length
+      ? data.sat_ranges.map(([start, end]) => `[${start} - ${end}]`)
+      : [`[unresolved: 0 - ${utxo.value}]`];
+
+    // inscriptions is an array of ID strings e.g. ["abc123i0"]
+    const inscriptions = data ? (data.inscriptions || []) : [];
+    const attributes = inscriptions.length
+      ? inscriptions.map(id => `Inscription ${id.slice(0, 8)}...`)
+      : ['cardinal'];
+    const protected_ = inscriptions.length > 0;
+
+    return { outpoint, value: utxo.value, ranges, attributes, protected: protected_ };
+  }));
+
+  res.json({ success: true, utxos: results });
+});
+
+// Helper for /api/compare-sat-ranges
+async function fetchRangesForAddress(address, amountSats) {
+  const r = await fetch(`https://mempool.space/api/address/${address}/utxo`);
+  if (!r.ok) throw new Error(`mempool.space returned ${r.status} for ${address}`);
+  const utxos = await r.json();
+
+  const utxo = utxos.find(u => u.value === amountSats);
+  if (!utxo) return { found: false, utxos_seen: utxos.length };
+
+  const outpoint = `${utxo.txid}:${utxo.vout}`;
+  let data = null;
+  try {
+    const hr = await fetch(`https://ordinals.com/output/${outpoint}`, {
+      headers: { Accept: 'application/json' }
+    });
+    if (hr.ok) data = await hr.json();
+  } catch (e) {
+    console.error(`[compare] ordinals lookup failed for ${outpoint}:`, e.message);
+  }
+
+  const ranges = !data
+    ? ['[not yet indexed]']
+    : data.sat_ranges && data.sat_ranges.length
+      ? data.sat_ranges.map(([s, e]) => `[${s} - ${e}]`)
+      : ['[unresolved]'];
+
+  const inscriptions = data ? (data.inscriptions || []) : [];
+  const attributes   = inscriptions.length
+    ? inscriptions.map(id => `Inscription ${id.slice(0, 8)}...`)
+    : ['cardinal'];
+  const hasInscription = inscriptions.length > 0;
+  const hasRare        = false; // sat rarity requires per-sat lookup, skipped for now
+
+  return {
+    found: true,
+    outpoint,
+    value: utxo.value,
+    confirmed: !!(utxo.status && utxo.status.confirmed),
+    block_height: (utxo.status && utxo.status.block_height) || null,
+    ranges,
+    attributes,
+    protected: hasInscription || hasRare,
+  };
+}
+
+// POST /api/compare-sat-ranges
+app.post('/api/compare-sat-ranges', async (req, res) => {
+  const { senderAddress, destAddress, amountSats } = req.body;
+  if (!senderAddress && !destAddress) {
+    return res.status(400).json({ success: false, error: 'At least one of senderAddress or destAddress is required' });
+  }
+  if (!amountSats || amountSats <= 0) {
+    return res.status(400).json({ success: false, error: 'amountSats is required and must be positive' });
+  }
+
+  let senderResult = null;
+  let destResult = null;
+  try {
+    if (senderAddress && destAddress) {
+      [senderResult, destResult] = await Promise.all([
+        fetchRangesForAddress(senderAddress, amountSats),
+        fetchRangesForAddress(destAddress, amountSats),
+      ]);
+    } else if (senderAddress) {
+      senderResult = await fetchRangesForAddress(senderAddress, amountSats);
+    } else {
+      destResult = await fetchRangesForAddress(destAddress, amountSats);
+    }
+  } catch (e) {
+    return res.status(502).json({ success: false, error: e.message });
+  }
+
+  let comparison;
+  const sFound = senderResult && senderResult.found;
+  const dFound = destResult && destResult.found;
+
+  if (sFound && dFound) {
+    // Parse "[start - end]" strings back to numeric pairs for overlap calculation
+    function parseRanges(rangeStrings) {
+      const out = [];
+      for (const s of rangeStrings) {
+        const m = s.match(/\[(\d+)\s*-\s*(\d+)\]/);
+        if (m) out.push([Number(m[1]), Number(m[2])]);
+      }
+      return out;
+    }
+
+    const sRanges = parseRanges(senderResult.ranges);
+    const dRanges = parseRanges(destResult.ranges);
+
+    let overlapSats = 0;
+    for (const [ss, se] of sRanges) {
+      for (const [ds, de] of dRanges) {
+        const lo = Math.max(ss, ds);
+        const hi = Math.min(se, de);
+        if (hi > lo) overlapSats += hi - lo;
+      }
+    }
+
+    const sortedS = [...senderResult.ranges].sort().join(',');
+    const sortedD = [...destResult.ranges].sort().join(',');
+    const match = sortedS === sortedD;
+
+    let details;
+    if (match && overlapSats === amountSats) {
+      details = `Exact match: all ${amountSats} sats confirmed at destination`;
+    } else if (match) {
+      details = `Range sets identical but overlap count (${overlapSats}) differs from amountSats (${amountSats})`;
+    } else {
+      details = `Ranges differ; ${overlapSats} overlapping sats out of ${amountSats}`;
+    }
+
+    comparison = { available: true, match, overlap_sats: overlapSats, details };
+  } else {
+    const missing = [];
+    if (!sFound) missing.push(senderAddress ? 'sender UTXO not found' : 'sender not provided');
+    if (!dFound) missing.push(destAddress   ? 'dest UTXO not found'   : 'dest not provided');
+    comparison = { available: false, reason: missing.join('; ') };
+  }
+
+  res.json({ success: true, amountSats, sender: senderResult, dest: destResult, comparison });
 });
 
 app.listen(PORT, () => {

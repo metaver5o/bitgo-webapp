@@ -1,0 +1,13 @@
+node_modules
+.git
+.gitignore
+.DS_Store
+.env
+.ACCESS_TOKEN_OVERRIDE
+.wallets-cache.json
+.bitgo-pass
+*.log
+prebuild_*.json
+send_result.json
+Bitgo-webapp/
+backup-original/

@@ -19,6 +19,7 @@
     --muted:     #666;
     --input-bg:  #1a1a1a;
     --radius:    6px;
+    --purple:    #a855f7;
   }
 
   body {
@@ -211,6 +212,77 @@
     .two-col { grid-template-columns: 1fr; }
     .token-row { flex-direction: column; align-items: stretch; }
   }
+
+  /* Tab navigation */
+  .tabs-nav {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+  }
+  .tab-btn {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    padding: 8px 16px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: color 0.15s, border-color 0.15s;
+    margin-bottom: -1px;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--purple); border-bottom-color: var(--purple); }
+
+  .btn-purple { background: var(--purple); color: #000; }
+
+  /* Auditor table */
+  .auditor-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .auditor-table th {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+  }
+  .auditor-table td {
+    padding: 12px 8px;
+    border-bottom: 1px solid #1f1f1f;
+    vertical-align: top;
+  }
+  .auditor-table tr:hover { background: #181818; }
+  .attr-tag {
+    display: inline-block;
+    font-size: 10px;
+    background: #1e1135;
+    color: #c084fc;
+    border: 1px solid #3b0764;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin: 2px 2px 0 0;
+    font-weight: 600;
+  }
+  .attr-tag.exotic {
+    background: #2a1f05;
+    color: #fbbf24;
+    border-color: #78350f;
+  }
+  .sat-range { font-size: 11px; color: #a3a3a3; word-break: break-all; line-height: 1.5; }
+  .badge-locked   { font-size:10px; padding:2px 6px; border-radius:4px; font-weight:bold;
+                    background:#311010; color:#f87171; border:1px solid #7f1d1d; }
+  .badge-clean    { font-size:10px; padding:2px 6px; border-radius:4px; font-weight:bold;
+                    background:#112414; color:#4ade80; border:1px solid #14532d; }
 </style>
 </head>
 <body>
@@ -224,6 +296,13 @@
       <p>Safely move exact sat UTXOs with external fee payment · runs locally</p>
     </div>
   </div>
+
+  <div class="tabs-nav">
+    <button onclick="switchTab('transfer')" id="nav-transfer" class="tab-btn active">Engine Pipeline</button>
+    <button onclick="switchTab('auditor')"  id="nav-auditor"  class="tab-btn">Sat Ranger</button>
+  </div>
+
+  <div id="tab-transfer">
 
   <!-- Section 1: Access Token -->
   <div class="card">
@@ -245,7 +324,7 @@
       <div class="card-title">② Wallets</div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-secondary btn-sm" onclick="loadWallets()">Load from wallets.txt</button>
-        <button class="btn btn-secondary btn-sm" onclick="refreshWallets()">↻ Refresh from BitGo</button>
+        <button class="btn btn-secondary btn-sm" onclick="refreshWallets(this)">↻ Refresh from BitGo</button>
       </div>
     </div>
     <div class="two-col">
@@ -312,7 +391,7 @@
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
       <div class="card-title" style="margin-bottom:0">Terminal Output</div>
       <div style="display:flex;gap:8px;">
-        <button class="btn btn-secondary btn-sm" onclick="copyTerminal()">📋 Copy Logs</button>
+        <button class="btn btn-secondary btn-sm" onclick="copyTerminal(this)">📋 Copy Logs</button>
         <button class="btn btn-secondary btn-sm" onclick="clearTerminal()">Clear</button>
       </div>
     </div>
@@ -340,6 +419,85 @@
     <!-- Error panel -->
     <div class="error-panel" id="errorPanel"></div>
   </div>
+
+  </div><!-- #tab-transfer -->
+
+  <div id="tab-auditor" style="display:none;">
+
+    <div class="card">
+      <div class="card-title">Universal UTXO Sat Ranger</div>
+      <div class="row">
+        <label>Bitcoin Address</label>
+        <input type="text" id="auditAddress"
+               placeholder="bc1p... or bc1q... or 3... or 1..."
+               autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn btn-purple" id="scanBtn" onclick="runSatAudit()">
+          Scan Sat Ranges
+        </button>
+      </div>
+    </div>
+
+    <div class="card" id="auditResultsCard" style="display:none;">
+      <div class="card-title" id="auditStatus">Results</div>
+      <div style="overflow-x:auto;">
+        <table class="auditor-table">
+          <thead>
+            <tr>
+              <th>Outpoint</th>
+              <th>Value (sats)</th>
+              <th>Sat Ranges</th>
+              <th>Attributes</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="auditRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:8px;">
+      <div class="card-title">Range Comparison</div>
+      <div class="two-col">
+        <div class="row">
+          <label>Sender Address <span style="color:var(--muted)">(pre-transfer)</span></label>
+          <input type="text" id="cmpSender" placeholder="bc1p... (optional)" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="row">
+          <label>Destination Address <span style="color:var(--muted)">(post-transfer)</span></label>
+          <input type="text" id="cmpDest" placeholder="bc1p... (optional)" autocomplete="off" spellcheck="false" />
+        </div>
+      </div>
+      <div class="row">
+        <label>Amount (sats)</label>
+        <input type="number" id="cmpAmount" value="5000" min="1" style="max-width:200px;" />
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn btn-purple" id="cmpBtn" onclick="runRangeComparison()">Compare Ranges</button>
+      </div>
+    </div>
+
+    <div class="card" id="cmpResultCard" style="display:none; margin-top:8px;">
+      <div class="card-title" id="cmpStatus">Comparison Result</div>
+
+      <!-- Match verdict banner -->
+      <div id="cmpVerdict" style="margin-bottom:16px;"></div>
+
+      <!-- Two-column: sender | dest -->
+      <div class="two-col">
+        <div>
+          <div style="font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Sender Side</div>
+          <div id="cmpSenderResult"></div>
+        </div>
+        <div>
+          <div style="font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Destination Side</div>
+          <div id="cmpDestResult"></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- #tab-auditor -->
 
 </div>
 
@@ -432,8 +590,7 @@ async function loadWallets() {
   }
 }
 
-async function refreshWallets() {
-  const btn = event.target;
+async function refreshWallets(btn) {
   btn.disabled = true;
   btn.textContent = 'Refreshing...';
   try {
@@ -526,7 +683,7 @@ function clearTerminal() {
   setStatus('idle');
 }
 
-function copyTerminal() {
+function copyTerminal(btn) {
   const term = document.getElementById('terminal');
   const content = term.innerText;
 
@@ -535,7 +692,6 @@ function copyTerminal() {
   }
 
   navigator.clipboard.writeText(content).then(() => {
-    const btn = event.target;
     const orig = btn.textContent;
     btn.textContent = '✓ Copied!';
     setTimeout(() => { btn.textContent = orig; }, 1500);
@@ -716,6 +872,174 @@ async function runTransfer() {
     running = false;
     document.getElementById('runBtn').disabled = false;
     document.getElementById('runBtn').textContent = '⚡ Run Transfer';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tab switching
+// ---------------------------------------------------------------------------
+function switchTab(tab) {
+  document.getElementById('tab-transfer').style.display = tab === 'transfer' ? 'block' : 'none';
+  document.getElementById('tab-auditor').style.display  = tab === 'auditor'  ? 'block' : 'none';
+  document.getElementById('nav-transfer').classList.toggle('active', tab === 'transfer');
+  document.getElementById('nav-auditor').classList.toggle('active', tab === 'auditor');
+}
+
+// ---------------------------------------------------------------------------
+// Universal Sat Ranger
+// ---------------------------------------------------------------------------
+async function runSatAudit() {
+  const address = document.getElementById('auditAddress').value.trim();
+  if (!address) return alert('Enter a Bitcoin address.');
+
+  const btn         = document.getElementById('scanBtn');
+  const resultsCard = document.getElementById('auditResultsCard');
+  const statusEl    = document.getElementById('auditStatus');
+  const rowsEl      = document.getElementById('auditRows');
+
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+  resultsCard.style.display = 'block';
+  statusEl.textContent = 'Querying mempool and ordinals index...';
+  rowsEl.innerHTML = '';
+
+  try {
+    const res  = await fetch('/api/audit-universal-ranges', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+
+    statusEl.innerHTML = `Found <b>${data.utxos.length}</b> UTXO(s)`;
+
+    if (data.utxos.length === 0) {
+      rowsEl.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px 0;">No UTXOs found for this address.</td></tr>`;
+      return;
+    }
+
+    data.utxos.forEach(u => {
+      const tr = document.createElement('tr');
+      const ranges = u.ranges.map(r => `<div class="sat-range">${r}</div>`).join('');
+      const attrs  = u.attributes.map(a => {
+        const exotic = a.includes('⭐') || a.includes('vintage') || a.includes('Vintage');
+        return `<span class="attr-tag${exotic ? ' exotic' : ''}">${a}</span>`;
+      }).join('');
+      const badge = u.protected
+        ? `<span class="badge-locked">Protected</span>`
+        : `<span class="badge-clean">Cardinal</span>`;
+      tr.innerHTML = `
+        <td style="color:var(--green);font-size:11px;word-break:break-all;max-width:200px;">${u.outpoint}</td>
+        <td style="font-weight:bold;">${u.value.toLocaleString()}</td>
+        <td>${ranges}</td>
+        <td>${attrs}</td>
+        <td>${badge}</td>
+      `;
+      rowsEl.appendChild(tr);
+    });
+
+  } catch (e) {
+    statusEl.innerHTML = `<span style="color:var(--red);">Error: ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Scan Sat Ranges';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Range Comparison
+// ---------------------------------------------------------------------------
+function renderRangeSide(container, side, label) {
+  if (!side) {
+    container.innerHTML = `<span style="color:var(--muted);font-size:11px;">Not queried</span>`;
+    return;
+  }
+  if (!side.found) {
+    container.innerHTML = `<span style="color:var(--muted);font-size:11px;">No UTXO found matching amount (${side.utxos_seen} UTXOs seen)</span>`;
+    return;
+  }
+  const confirmed = side.confirmed
+    ? `<span style="color:var(--green);font-size:10px;">confirmed @ block ${side.block_height}</span>`
+    : `<span style="color:var(--yellow);font-size:10px;">unconfirmed</span>`;
+  const ranges = side.ranges.map(r => `<div class="sat-range">${r}</div>`).join('');
+  const attrs  = side.attributes.map(a => {
+    const exotic = a.includes('⭐') || a.toLowerCase().includes('vintage');
+    return `<span class="attr-tag${exotic ? ' exotic' : ''}">${a}</span>`;
+  }).join('');
+  container.innerHTML = `
+    <div style="font-size:11px; color:var(--text); margin-bottom:4px; word-break:break-all;">
+      ${side.outpoint}
+    </div>
+    <div style="margin-bottom:6px;">${confirmed}</div>
+    <div style="font-size:10px; color:var(--muted); margin-bottom:4px;">SAT RANGES</div>
+    ${ranges}
+    <div style="margin-top:8px;">${attrs}</div>
+  `;
+}
+
+async function runRangeComparison() {
+  const senderAddr = document.getElementById('cmpSender').value.trim();
+  const destAddr   = document.getElementById('cmpDest').value.trim();
+  const amount     = parseInt(document.getElementById('cmpAmount').value);
+
+  if (!senderAddr && !destAddr) return alert('Enter at least one address.');
+  if (!amount || amount < 1)    return alert('Enter a valid amount.');
+
+  const btn        = document.getElementById('cmpBtn');
+  const resultCard = document.getElementById('cmpResultCard');
+  const statusEl   = document.getElementById('cmpStatus');
+  const verdictEl  = document.getElementById('cmpVerdict');
+  const senderEl   = document.getElementById('cmpSenderResult');
+  const destEl     = document.getElementById('cmpDestResult');
+
+  btn.disabled = true;
+  btn.textContent = 'Comparing...';
+  resultCard.style.display = 'block';
+  statusEl.textContent = 'Querying sat ranges...';
+  verdictEl.innerHTML = '';
+  senderEl.innerHTML  = '';
+  destEl.innerHTML    = '';
+
+  try {
+    const res  = await fetch('/api/compare-sat-ranges', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        senderAddress: senderAddr || undefined,
+        destAddress:   destAddr   || undefined,
+        amountSats:    amount
+      })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+
+    statusEl.textContent = `Range Comparison — ${amount.toLocaleString()} sats`;
+
+    if (data.comparison.available) {
+      const match = data.comparison.match;
+      verdictEl.innerHTML = `
+        <div style="padding:10px 14px; border-radius:var(--radius); border:1px solid ${match ? 'var(--green)' : 'var(--red)'};
+                    background:${match ? '#0a1a0a' : '#1a0a0a'}; color:${match ? 'var(--green)' : 'var(--red)'};
+                    font-size:12px; font-weight:600;">
+          ${match ? '✓ MATCH' : '✗ MISMATCH'} — ${data.comparison.details}
+        </div>`;
+    } else {
+      verdictEl.innerHTML = `
+        <div style="padding:10px 14px; border-radius:var(--radius); border:1px solid var(--border);
+                    background:var(--surface); color:var(--muted); font-size:11px;">
+          ${data.comparison.reason}
+        </div>`;
+    }
+
+    renderRangeSide(senderEl, data.sender, 'Sender');
+    renderRangeSide(destEl,   data.dest,   'Destination');
+
+  } catch (e) {
+    statusEl.innerHTML = `<span style="color:var(--red);">Error: ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Compare Ranges';
   }
 }
 </script>
